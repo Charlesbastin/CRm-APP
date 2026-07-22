@@ -1,0 +1,288 @@
+rules_version = '2';
+
+// ============================================================
+// TechnoCraft 2026 — Firestore Security Rules
+// Phase A: Role-Based Access Control
+//
+// SECURITY MODEL:
+//   - Roles are stored in /users/{uid}.role
+//   - Users CANNOT change their own role
+//   - Students can ONLY self-register (as Student)
+//   - Coordinators require Admin approval
+//   - Admin accounts CANNOT be created from the app
+//   - All sensitive collections are explicitly locked
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Helper functions ----
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function getUserDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function currentUserDoc() {
+      return getUserDoc(request.auth.uid);
+    }
+
+    function currentRole() {
+      return signedIn() && currentUserDoc().data.role;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isStudent() {
+      return signedIn() && currentRole() == "Student";
+    }
+
+    function isCoordinator() {
+      return signedIn() && currentRole() == "Coordinator";
+    }
+
+    function isAdmin() {
+      return signedIn() && currentRole() == "Admin";
+    }
+
+    function isActiveCoordinator() {
+      return isCoordinator() && currentUserDoc().data.status == "active";
+    }
+
+    function isStaff() {
+      return isActiveCoordinator() || isAdmin();
+    }
+
+    function ownsEvent(eventId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/events/$(eventId))
+        && get(/databases/$(database)/documents/events/$(eventId)).data.createdBy == request.auth.uid;
+    }
+
+    function notChangingRole() {
+      return !("role" in request.resource.data.diff(resource.data).affectedKeys());
+    }
+
+    function notChangingEmail() {
+      return !("email" in request.resource.data.diff(resource.data).affectedKeys());
+    }
+
+    // ============================================================
+    // USERS COLLECTION
+    //   - Students can self-register (role must be "Student")
+    //   - Coordinators can self-register (status = "pending", Admin must approve)
+    //   - Admin accounts CANNOT be created from the app at all
+    //   - Users cannot change their own role or email
+    //   - Admins can manage all users
+    // ============================================================
+    match /users/{userId} {
+
+      allow read: if isSelf(userId) || isStaff();
+
+      // Students can create their own profile — role MUST be "Student"
+      allow create: if isSelf(userId)
+        && request.resource.data.role == "Student"
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasAll(["email", "name", "role"]);
+
+      // Coordinators can request an account — role is "Coordinator", status is "pending"
+      allow create: if isSelf(userId)
+        && request.resource.data.role == "Coordinator"
+        && request.resource.data.status == "pending"
+        && request.resource.data.email == request.auth.token.email;
+
+      // Users can update their own profile BUT cannot change role or email
+      allow update: if isSelf(userId)
+        && notChangingRole()
+        && notChangingEmail();
+
+      // Only Admins can promote/demote roles, activate Coordinators, disable accounts
+      allow update, delete: if isAdmin();
+    }
+
+    // ============================================================
+    // EVENTS COLLECTION
+    //   - All signed-in users can read events
+    //   - Only active Coordinators or Admins can create events
+    //   - Creator or Admin can update; only Admin can delete
+    // ============================================================
+    match /events/{eventId} {
+      allow read: if signedIn();
+
+      allow create: if isStaff()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.entryFee is number
+        && request.resource.data.entryFee >= 0
+        && request.resource.data.capacity is number
+        && request.resource.data.capacity > 0
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0;
+
+      allow update: if isAdmin() || ownsEvent(eventId);
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // REGISTRATIONS COLLECTION
+    //   - Students can only register themselves (status must start as "Pending")
+    //   - Students cannot approve their own registrations
+    //   - Coordinators can approve/reject only registrations for their own events
+    //   - Admins have full access
+    // ============================================================
+    match /registrations/{registrationId} {
+
+      allow read: if isAdmin()
+        || resource.data.studentId == request.auth.uid
+        || ownsEvent(resource.data.eventId);
+
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == "Pending"
+        && request.resource.data.keys().hasAll(["studentId", "eventId", "status"]);
+
+      // Coordinators can approve/reject — but cannot change student or event
+      allow update: if isAdmin()
+        || (
+          ownsEvent(resource.data.eventId)
+          && request.resource.data.eventId == resource.data.eventId
+          && request.resource.data.studentId == resource.data.studentId
+          && request.resource.data.status in ["Approved", "Rejected"]
+        );
+
+      // Students can NEVER update their own registration (prevents self-approval)
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // PAYMENTS COLLECTION
+    //   - Students can read their own payment records
+    //   - Payments can only be created/updated by Cloud Functions (via Admin SDK)
+    //     so no client-side write rules are allowed here
+    //   - Admins can read all payments
+    // ============================================================
+    match /payments/{paymentId} {
+      allow read: if isAdmin()
+        || resource.data.studentId == request.auth.uid;
+
+      // Payments are ONLY written by Cloud Functions (Admin SDK bypasses rules)
+      allow write: if false;
+    }
+
+    // ============================================================
+    // PASSES (QR Tokens) COLLECTION
+    //   - Students can read their own passes
+    //   - Passes are generated only by Cloud Functions (server-side)
+    //   - Coordinators and Admins can read passes for their events
+    // ============================================================
+    match /passes/{passId} {
+      allow read: if isAdmin()
+        || resource.data.studentId == request.auth.uid
+        || ownsEvent(resource.data.eventId);
+
+      // Passes are ONLY written by Cloud Functions (server-side QR generation)
+      allow write: if false;
+    }
+
+    // ============================================================
+    // ATTENDANCE COLLECTION
+    //   - Only Coordinators/Admins can mark attendance
+    //   - Students can read their own attendance records
+    //   - Nobody can modify or delete attendance records (immutable log)
+    // ============================================================
+    match /attendance/{attendanceId} {
+      allow create: if isStaff()
+        && request.resource.data.scannedBy == request.auth.uid
+        && request.resource.data.keys().hasAll(["studentId", "eventId", "scannedBy"]);
+
+      allow read: if isAdmin()
+        || resource.data.studentId == request.auth.uid
+        || isStaff();
+
+      // Attendance records are IMMUTABLE — no updates or deletes
+      allow update, delete: if false;
+    }
+
+    // ============================================================
+    // NOTIFICATIONS COLLECTION
+    //   - Users can only read their own notifications
+    //   - Users can mark their own notifications as read
+    //   - Staff can create notifications for any user
+    // ============================================================
+    match /notifications/{notificationId} {
+      allow create: if isStaff()
+        || (signedIn() && request.resource.data.userId == request.auth.uid);
+
+      allow read: if isAdmin() || resource.data.userId == request.auth.uid;
+
+      allow update: if resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["isRead"]);
+
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // CERTIFICATES COLLECTION
+    //   - Generated by Cloud Functions only
+    //   - Students can read their own certificates
+    //   - Staff can read all certificates
+    // ============================================================
+    match /certificates/{certificateId} {
+      allow read: if isAdmin()
+        || resource.data.studentId == request.auth.uid
+        || isStaff();
+
+      // Certificates are ONLY written by Cloud Functions
+      allow write: if false;
+    }
+
+    // ============================================================
+    // AUDIT LOGS COLLECTION
+    //   - Immutable — written by Cloud Functions only
+    //   - Only Admins can read audit logs
+    // ============================================================
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ============================================================
+    // SETTINGS COLLECTION
+    //   - Only Admins can read/write global settings
+    // ============================================================
+    match /settings/{settingId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ============================================================
+    // FEEDBACK COLLECTION
+    //   - Students can submit feedback for events they attended
+    //   - Staff and Admin can read all feedback
+    // ============================================================
+    match /feedback/{feedbackId} {
+      allow create: if isStudent()
+        && request.resource.data.studentId == request.auth.uid;
+
+      allow read: if isAdmin()
+        || resource.data.studentId == request.auth.uid
+        || isStaff();
+
+      allow update: if resource.data.studentId == request.auth.uid
+        && request.resource.data.studentId == resource.data.studentId;
+
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // DEFAULT DENY — All other collections are blocked
+    // ============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

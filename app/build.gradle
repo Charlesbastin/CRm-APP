@@ -1,0 +1,36 @@
+apply plugin: "com.android.application"
+
+android {
+    namespace "com.technocraft.events.firebase"
+    compileSdk 35
+    buildToolsVersion "35.0.0"
+
+    defaultConfig {
+        applicationId "com.technocraft.events.firebase"
+        minSdk 24
+        targetSdk 35
+        versionCode 12
+        versionName "1.2-UPI"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file("../../technocraft-upi-release.keystore")
+            storePassword "technocraft2026"
+            keyAlias "technocraft-upi"
+            keyPassword "technocraft2026"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+    }
+}

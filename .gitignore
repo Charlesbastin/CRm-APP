@@ -1,0 +1,55 @@
+# Android SDK & Build tools (large binaries)
+android-sdk-local/
+android-local/
+
+# Gradle
+.gradle/
+build/
+*/build/
+
+# APK build artifacts
+*.apk
+*.apk.idsig
+*.idsig
+
+# Keystores (sensitive - never commit!)
+*.keystore
+*.jks
+
+# APK build folders
+apk-*/
+apk-analysis-*/
+apk-auth-*/
+apk-bento-*/
+apk-build-*/
+apk-launcher-*/
+apk-login-*/
+apk-material-*/
+apk-minimal-*/
+apk-release-*/
+apk-safe-*/
+apk-signout-*/
+apk-spacing-*/
+apk-splash-*/
+apk-technocraft-*/
+apk-trend-*/
+
+# Local Android properties
+local.properties
+
+# Flutter build
+technocraft_flutter/build/
+
+# Node modules
+node_modules/
+
+# Firebase emulator data
+.firebase/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.iml

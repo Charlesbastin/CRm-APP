@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TechnoCraft Certificate Verification</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,500,0,0" />
+  <style>
+    :root {
+      --bg: #f6f7f4;
+      --panel: #ffffff;
+      --ink: #17211d;
+      --muted: #61706a;
+      --line: #dce3de;
+      --accent: #0f7b63;
+      --gold: #b87918;
+      --red: #b63d3d;
+      --green-soft: #e6f5ee;
+      --red-soft: #faeaea;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .card {
+      background: var(--panel);
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+      padding: 32px;
+      width: 100%;
+      max-width: 460px;
+      text-align: center;
+    }
+    h2 {
+      margin: 0 0 8px;
+      color: var(--accent);
+    }
+    p.sub {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      text-align: left;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    label {
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+    }
+    input {
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 1rem;
+      color: var(--ink);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: var(--accent);
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      width: 100%;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #095744;
+    }
+    .result {
+      margin-top: 24px;
+      padding: 18px;
+      border-radius: 10px;
+      display: none;
+      text-align: left;
+      border: 1px solid var(--line);
+    }
+    .result.success {
+      background: var(--green-soft);
+      border-color: rgba(15,123,99,0.2);
+    }
+    .result.error {
+      background: var(--red-soft);
+      border-color: rgba(182, 61, 61, 0.2);
+      color: var(--red);
+    }
+    .result-row {
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .result-row:last-child {
+      margin-bottom: 0;
+    }
+    .result-row span {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .result-row strong {
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>TechnoCraft 2026</h2>
+    <p class="sub">Certificate Authentication Portal</p>
+    
+    <div class="input-group">
+      <label for="certInput">Certificate Number</label>
+      <input type="text" id="certInput" placeholder="E.g., CERT-2026-XXXXXX" />
+    </div>
+    <button id="verifyBtn">Verify Certificate</button>
+    
+    <div id="resultBox" class="result"></div>
+  </div>
+
+  <!-- Include Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="./firebase-config.js"></script>
+  <script>
+    // Initialize Firebase
+    if (window.TECHNOCRAFT_FIREBASE_ENABLED) {
+      firebase.initializeApp(window.TECHNOCRAFT_FIREBASE_CONFIG);
+      const db = firebase.firestore();
+
+      const certInput = document.getElementById("certInput");
+      const verifyBtn = document.getElementById("verifyBtn");
+      const resultBox = document.getElementById("resultBox");
+
+      verifyBtn.addEventListener("click", async () => {
+        const value = certInput.value.trim();
+        if (!value) return;
+
+        resultBox.style.display = "none";
+        resultBox.className = "result";
+        resultBox.innerHTML = "Verifying...";
+        resultBox.style.display = "block";
+
+        try {
+          const snap = await db.collection("certificates")
+            .where("certNumber", "==", value)
+            .limit(1)
+            .get();
+
+          if (snap.empty) {
+            resultBox.classList.add("error");
+            resultBox.innerHTML = "<strong>Verification Failed:</strong> Invalid certificate number. This certificate was not issued by TechnoCraft.";
+            return;
+          }
+
+          const cert = snap.docs[0].data();
+          resultBox.classList.add("success");
+          resultBox.innerHTML = `
+            <div style="font-weight:bold; color:var(--accent); margin-bottom:12px; font-size:1.05rem;">✔ Verified Authentic</div>
+            <div class="result-row"><span>Student Name</span><strong>${cert.studentName}</strong></div>
+            <div class="result-row"><span>Event Title</span><strong>${cert.eventName}</strong></div>
+            <div class="result-row"><span>Issued Date</span><strong>${new Date(cert.issuedAt).toLocaleDateString()}</strong></div>
+            <div class="result-row"><span>Serial Number</span><strong>${cert.certNumber}</strong></div>
+            <div style="margin-top:12px; text-align:center;"><a href="${cert.pdfUrl}" target="_blank" style="color:var(--accent); font-weight:bold; text-decoration:none;">View Original PDF Pass</a></div>
+          `;
+        } catch (err) {
+          resultBox.classList.add("error");
+          resultBox.innerHTML = "Error contacting server. Please try again later.";
+        }
+      });
+    }
+  </script>
+</body>
+</html>
